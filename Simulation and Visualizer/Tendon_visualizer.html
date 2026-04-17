@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tendon-Constrained Plate Visualizer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:     #0f1117;
+    --bg2:    #1a1d27;
+    --bg3:    #222636;
+    --brd:    #2e3350;
+    --txt:    #e8eaf0;
+    --txt2:   #8b90a8;
+    --txt3:   #454e6a;
+    --acc:    #4a9eff;
+    --r:      8px;
+    --rl:     12px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--txt);
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    padding: 16px 20px 22px;
+  }
+
+  h1 {
+    font-size: 12px;
+    font-weight: normal;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--txt3);
+    margin-bottom: 13px;
+    border-bottom: 0.5px solid var(--brd);
+    padding-bottom: 8px;
+  }
+
+  #layout { display: flex; gap: 13px; align-items: flex-start; }
+
+  canvas#c3d {
+    border-radius: var(--rl);
+    border: 0.5px solid var(--brd);
+    background: #060911;
+    display: block;
+    cursor: grab;
+    flex-shrink: 0;
+  }
+  canvas#c3d:active { cursor: grabbing; }
+
+  #sidebar { flex: 0 0 214px; display: flex; flex-direction: column; gap: 8px; }
+
+  .card {
+    background: var(--bg2);
+    border: 0.5px solid var(--brd);
+    border-radius: var(--r);
+    padding: 9px 12px;
+  }
+
+  .clabel {
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--txt3);
+    margin-bottom: 4px;
+  }
+
+  .cval { font-size: 15px; font-weight: bold; }
+
+  /* Tendon rows */
+  .trow {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11.5px;
+    color: var(--txt2);
+    margin-bottom: 5px;
+    transition: color 0.15s;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Slack badge */
+  .badge {
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .badge-slack { background: #2a1a1a; color: #e05050; border: 0.5px solid #5a2020; }
+  .badge-taut  { background: #1a2a1a; color: #50c050; border: 0.5px solid #205020; }
+
+  #transport {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 7px 0 3px;
+  }
+
+  button {
+    background: var(--bg2);
+    border: 0.5px solid var(--brd);
+    border-radius: var(--r);
+    color: var(--txt);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 5px 12px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--bg3); }
+  button.active { background: #132236; border-color: var(--acc); color: var(--acc); }
+
+  select {
+    background: var(--bg2);
+    border: 0.5px solid var(--brd);
+    border-radius: var(--r);
+    color: var(--txt2);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 4px 7px;
+    cursor: pointer;
+  }
+
+  #scrubber { flex: 1; accent-color: var(--acc); cursor: pointer; }
+  #tval { font-size: 12px; color: var(--txt2); min-width: 44px; text-align: right; }
+
+  canvas#tens-canvas {
+    display: block;
+    border-radius: var(--r);
+    border: 0.5px solid var(--brd);
+    background: #060911;
+    margin-top: 9px;
+  }
+
+  #loader {
+    background: var(--bg2);
+    border: 0.5px solid var(--brd);
+    border-radius: var(--r);
+    padding: 9px 12px;
+    font-size: 11.5px;
+    color: var(--txt2);
+    line-height: 1.7;
+  }
+  #loader strong { color: var(--txt); }
+  #file-btn {
+    margin-top: 6px; width: 100%;
+    font-size: 11px; padding: 6px 0;
+    border-style: dashed;
+  }
+  #file-input { display: none; }
+  #load-status { margin-top: 5px; font-size: 10px; color: #40b870; min-height: 12px; }
+  #hint { font-size: 10.5px; color: var(--txt3); line-height: 1.65; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<h1>Tendon-Constrained Plate · XZ Base Plane · Quaternion Orientation</h1>
+
+<div id="layout">
+  <canvas id="c3d" width="590" height="450"></canvas>
+
+  <div id="sidebar">
+
+    <div class="card">
+      <div class="clabel">Height Y</div>
+      <div class="cval" id="v-y">—</div>
+    </div>
+
+    <div class="card">
+      <div class="clabel">Roll / Pitch / Yaw</div>
+      <div class="cval" id="v-rot" style="font-size:13px">—</div>
+    </div>
+
+    <div class="card">
+      <div class="clabel" style="margin-bottom:7px">Main tendons</div>
+      <div class="trow" id="row-t1">
+        <span class="dot" style="background:#e05050"></span>
+        <span id="t1-val">T1 —</span>
+        <span class="badge badge-taut" id="t1-badge">TAUT</span>
+      </div>
+      <div class="trow" id="row-t2">
+        <span class="dot" style="background:#5090e0"></span>
+        <span id="t2-val">T2 —</span>
+        <span class="badge badge-taut" id="t2-badge">TAUT</span>
+      </div>
+      <div class="trow" id="row-t3">
+        <span class="dot" style="background:#40b870"></span>
+        <span id="t3-val">T3 —</span>
+        <span class="badge badge-taut" id="t3-badge">TAUT</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="clabel">Perimeter ring (mean)</div>
+      <div class="cval" id="v-perim">— N</div>
+    </div>
+
+    <div class="card">
+      <div class="clabel">Time</div>
+      <div class="cval" id="v-t">0.000 s</div>
+    </div>
+
+    <div id="loader">
+      <strong>Load MATLAB data</strong><br>
+      Run the .m script → load <code>tendon_sim.json</code>
+      <button id="file-btn" onclick="document.getElementById('file-input').click()">
+        ↑ Load tendon_sim.json
+      </button>
+      <input type="file" id="file-input" accept=".json">
+      <div id="load-status"></div>
+    </div>
+
+    <div id="hint">
+      Drag to orbit · scroll to zoom<br>
+      Tendon fades when slack<br>
+      Cyan loop = perimeter ring<br>
+      White arrow = plate normal
+    </div>
+  </div>
+</div>
+
+<div id="transport">
+  <button id="btn-play">▶ Play</button>
+  <button id="btn-reset">↺</button>
+  <select id="spd">
+    <option value="0.25">0.25×</option>
+    <option value="0.5">0.5×</option>
+    <option value="1" selected>1×</option>
+    <option value="2">2×</option>
+    <option value="4">4×</option>
+  </select>
+  <input type="range" id="scrubber" min="0" max="100" value="0" step="1">
+  <span id="tval">0.00 s</span>
+</div>
+
+<canvas id="tens-canvas" width="808" height="130"></canvas>
+
+<script>
+// ============================================================
+//  MATH HELPERS
+// ============================================================
+const v3 = {
+  add:  (a,b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]],
+  sub:  (a,b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]],
+  sc:   (a,s) => [a[0]*s,    a[1]*s,    a[2]*s   ],
+  len:  v     => Math.sqrt(v[0]**2+v[1]**2+v[2]**2),
+  xp:   (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]],
+  dot:  (a,b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+  norm: v     => { const l=Math.sqrt(v[0]**2+v[1]**2+v[2]**2); return [v[0]/l,v[1]/l,v[2]/l]; }
+};
+
+function quatMult(p, q) {
+  const [pw,px,py,pz] = p, [qw,qx,qy,qz] = q;
+  return [
+    pw*qw - px*qx - py*qy - pz*qz,
+    pw*qx + px*qw + py*qz - pz*qy,
+    pw*qy - px*qz + py*qw + pz*qx,
+    pw*qz + px*qy - py*qx + pz*qw,
+  ];
+}
+
+function quatToR(q) {
+  const [w,x,y,z] = q;
+  return [
+    [1-2*(y*y+z*z),   2*(x*y-w*z),   2*(x*z+w*y)],
+    [  2*(x*y+w*z), 1-2*(x*x+z*z),   2*(y*z-w*x)],
+    [  2*(x*z-w*y),   2*(y*z+w*x), 1-2*(x*x+y*y)],
+  ];
+}
+
+function apR(R, v) {
+  return [
+    R[0][0]*v[0]+R[0][1]*v[1]+R[0][2]*v[2],
+    R[1][0]*v[0]+R[1][1]*v[1]+R[1][2]*v[2],
+    R[2][0]*v[0]+R[2][1]*v[1]+R[2][2]*v[2],
+  ];
+}
+
+function quatToEuler(q) {
+  // ZYX convention → [roll, pitch, yaw] in degrees
+  const [w,x,y,z] = q;
+  const roll  = Math.atan2(2*(w*x+y*z), 1-2*(x*x+y*y)) * 180/Math.PI;
+  const pitch = Math.asin( Math.max(-1, Math.min(1, 2*(w*y-z*x))) ) * 180/Math.PI;
+  const yaw   = Math.atan2(2*(w*z+x*y), 1-2*(y*y+z*z)) * 180/Math.PI;
+  return [roll, pitch, yaw];
+}
+
+// ============================================================
+//  BUILT-IN SIMULATION  (quaternion integration, XZ base plane)
+// ============================================================
+function runBuiltinSim() {
+  const dt = 0.002, t_end = 6.0, ps = 0.25;
+  const mass = 0.4, I = mass*ps*ps/6;
+  const c_lin=2.5, c_ang=0.06, g=9.81;
+  const P_rate=50.0, area=(2*ps)**2;
+
+  const angs = [0, 2*Math.PI/3, 4*Math.PI/3];
+  const rb=ps*1.3, rp=ps*0.9;
+  const k_t=[60,180,350], k_nl=[0,0,0], L0_t=[0.10,0.10,0.10];
+  // Slack threshold = rest length (classical unilateral spring)
+  const Ls_t = [...L0_t];
+
+  const base_pts  = angs.map(a => [rb*Math.cos(a), 0, rb*Math.sin(a)]);
+  const plate_loc = angs.map(a => [rp*Math.cos(a), 0, rp*Math.sin(a)]);
+
+  const N_p=12, k_p=80, L0_p=0.08, Ls_p=L0_p;
+  const r_pp=ps*1.0, r_pb=ps*1.5;
+  const pa=Array.from({length:N_p},(_,i)=>2*Math.PI*i/N_p);
+  const perim_loc  = pa.map(a=>[r_pp*Math.cos(a), 0, r_pp*Math.sin(a)]);
+  const perim_base = pa.map(a=>[r_pb*Math.cos(a), 0, r_pb*Math.sin(a)]);
+
+  let pos=[0,0.15,0], vel=[0,0,0];
+  let q=[1,0,0,0], omega=[0,0,0];   // unit quaternion
+  const n_steps=Math.round(t_end/dt);
+  const frames=[];
+
+  for(let step=0;step<n_steps;step++){
+    const t=step*dt;
+    const R=quatToR(q);
+    const normal=apR(R,[0,1,0]);   // local +Y → world: EXACT from quaternion
+
+    const Fp=v3.sc(normal,P_rate*t*area);
+    const Fg=[0,-mass*g,0];
+
+    let Ft=[0,0,0],Tt=[0,0,0],tens=[0,0,0],slack=[1,1,1];
+    for(let i=0;i<3;i++){
+      const pa2=v3.add(pos,apR(R,plate_loc[i]));
+      const tv=v3.sub(pa2,base_pts[i]);
+      const L=v3.len(tv);
+      if(L>Ls_t[i]){
+        const ext=L-L0_t[i];
+        const Fm=k_t[i]*ext+k_nl[i]*ext**3;
+        tens[i]=Fm; slack[i]=0;
+        const Fi=v3.sc(v3.sc(tv,1/L),-Fm);
+        const rw=apR(R,plate_loc[i]);
+        Ft=v3.add(Ft,Fi); Tt=v3.add(Tt,v3.xp(rw,Fi));
+      }
+    }
+
+    let Fp2=[0,0,0],Tp2=[0,0,0],pm=0;
+    for(let j=0;j<N_p;j++){
+      const pa3=v3.add(pos,apR(R,perim_loc[j]));
+      const tv=v3.sub(pa3,perim_base[j]);
+      const L=v3.len(tv);
+      if(L>Ls_p){
+        const Fm=k_p*(L-L0_p);
+        pm+=Fm/N_p;
+        const Fj=v3.sc(v3.sc(tv,1/L),-Fm);
+        const rw=apR(R,perim_loc[j]);
+        Fp2=v3.add(Fp2,Fj); Tp2=v3.add(Tp2,v3.xp(rw,Fj));
+      }
+    }
+
+    const Fd=v3.sc(vel,-c_lin), Td=v3.sc(omega,-c_ang);
+    const Fnet=v3.add(v3.add(v3.add(v3.add(Fp,Fg),Ft),Fp2),Fd);
+    const Tnet=v3.add(v3.add(v3.add(Tt,Tp2),Td),[0,0,0]);
+
+    const acc=v3.sc(Fnet,1/mass);
+    vel=v3.add(vel,v3.sc(acc,dt));
+    pos=v3.add(pos,v3.sc(vel,dt));
+
+    // Quaternion kinematics — exact integration
+    const al=v3.sc(Tnet,1/I);
+    omega=v3.add(omega,v3.sc(al,dt));
+    const omega_q=[0,...omega];
+    const qdot=v3.sc(quatMult(q,omega_q),0.5);
+    q=v3.add(q,v3.sc(qdot,dt));
+    const qn=Math.sqrt(q[0]**2+q[1]**2+q[2]**2+q[3]**2);
+    q=q.map(c=>c/qn);   // re-normalise
+
+    if(step%4===0)
+      frames.push({pos:[...pos],q:[...q],normal:[...normal],
+                   tens:[...tens],slack:[...slack],perim_mean:pm,t});
+  }
+  return {frames, base_pts, plate_loc, perim_base, perim_loc,
+          plate_size:ps, N_perim:N_p, k:k_t, L0:L0_t};
+}
+
+// ============================================================
+//  STATE
+// ============================================================
+let SIM = runBuiltinSim();
+
+document.getElementById('file-input').addEventListener('change', e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const r=new FileReader();
+  r.onload=ev=>{
+    try {
+      SIM=JSON.parse(ev.target.result);
+      scrubber.max=SIM.frames.length-1;
+      scrubber.value=0; frameF=0; pause(); draw();
+      document.getElementById('load-status').textContent=
+        '✓ '+SIM.frames.length+' frames';
+    } catch(err) {
+      document.getElementById('load-status').textContent='✗ '+err.message;
+    }
+  };
+  r.readAsText(file);
+});
+
+// ============================================================
+//  3D RENDERER
+// ============================================================
+const c3=document.getElementById('c3d');
+const ctx=c3.getContext('2d');
+const W=c3.width, H=c3.height;
+let camYaw=0.4, camPitch=0.30, camDist=1.8;
+let dragging=false, lastMX=0, lastMY=0;
+
+c3.addEventListener('mousedown',e=>{dragging=true;lastMX=e.clientX;lastMY=e.clientY;});
+window.addEventListener('mouseup',()=>dragging=false);
+window.addEventListener('mousemove',e=>{
+  if(!dragging) return;
+  camYaw+=(e.clientX-lastMX)*0.01;
+  camPitch=Math.max(-1.3,Math.min(1.3,camPitch+(e.clientY-lastMY)*0.01));
+  lastMX=e.clientX; lastMY=e.clientY; draw();
+});
+c3.addEventListener('wheel',e=>{
+  camDist=Math.max(0.5,Math.min(4.5,camDist+e.deltaY*0.001));
+  e.preventDefault(); draw();
+},{passive:false});
+
+function project(p) {
+  const cy=Math.cos(camYaw),sy=Math.sin(camYaw);
+  const cp=Math.cos(camPitch),sp=Math.sin(camPitch);
+  const x=cy*p[0]+sy*p[2];
+  const y=-sy*sp*p[0]+cp*p[1]+cy*sp*p[2];
+  const fov=370/camDist;
+  return [W/2+x*fov, H/2-y*fov+40];
+}
+
+const TCOL=['#e05050','#5090e0','#40b870'];
+
+function plateCorners(ps) {
+  return [[-ps,0,-ps],[ps,0,-ps],[ps,0,ps],[-ps,0,ps]];
+}
+
+function drawGrid(){
+  const N=6,step=0.12;
+  ctx.strokeStyle='rgba(255,255,255,0.045)'; ctx.lineWidth=0.5;
+  for(let i=-N;i<=N;i++){
+    const a=project([i*step,0,-N*step]),b=project([i*step,0,N*step]);
+    const c2=project([-N*step,0,i*step]),d=project([N*step,0,i*step]);
+    ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(c2[0],c2[1]);ctx.lineTo(d[0],d[1]);ctx.stroke();
+  }
+  ctx.fillStyle='rgba(255,255,255,0.1)'; ctx.font='10px Courier New';
+  const lbl=project([N*step*0.75,0,N*step*0.75]);
+  ctx.fillText('XZ base',lbl[0],lbl[1]);
+}
+
+function drawAxes(){
+  const O=project([0,0,0]);
+  [[[0.22,0,0],'#ff5555','X'],[[0,0.22,0],'#55ee55','Y↑'],[[0,0,0.22],'#5599ff','Z']].forEach(([ep,col,lbl])=>{
+    const E=project(ep);
+    ctx.beginPath();ctx.moveTo(O[0],O[1]);ctx.lineTo(E[0],E[1]);
+    ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.stroke();
+    ctx.fillStyle=col;ctx.font='11px Courier New';
+    ctx.fillText(lbl,E[0]+4,E[1]-2);
+  });
+}
+
+function draw(){
+  const fi=parseInt(document.getElementById('scrubber').value);
+  const fr=SIM.frames[fi];
+
+  // Derive R from quaternion — normal is exact, no drift
+  const q=fr.q || [1,0,0,0];
+  const R=quatToR(q);
+  // Normal from R: column that local +Y maps to
+  const normal=apR(R,[0,1,0]);
+  const ps=SIM.plate_size;
+
+  ctx.clearRect(0,0,W,H);
+  drawGrid(); drawAxes();
+
+  // Trail
+  const tlen=Math.min(fi,100);
+  if(tlen>1){
+    ctx.beginPath();
+    for(let i=fi-tlen;i<=fi;i++){
+      const fp=SIM.frames[Math.max(0,i)];
+      const [px,py]=project(fp.pos);
+      i===fi-tlen?ctx.moveTo(px,py):ctx.lineTo(px,py);
+    }
+    ctx.strokeStyle='rgba(255,255,255,0.14)';ctx.lineWidth=1;ctx.stroke();
+  }
+
+  // ---- Perimeter tethers ----
+  if(SIM.perim_base&&SIM.perim_loc){
+    const NP=SIM.perim_base.length;
+    // Base anchor ring
+    ctx.beginPath();
+    for(let j=0;j<=NP;j++){
+      const pb=project(SIM.perim_base[j%NP]);
+      j?ctx.lineTo(pb[0],pb[1]):ctx.moveTo(pb[0],pb[1]);
+    }
+    ctx.strokeStyle='rgba(80,200,210,0.2)';ctx.lineWidth=0.8;
+    ctx.setLineDash([3,4]);ctx.stroke();ctx.setLineDash([]);
+
+    // Tether lines
+    for(let j=0;j<NP;j++){
+      const p_att=v3.add(fr.pos,apR(R,SIM.perim_loc[j]));
+      const pb=project(SIM.perim_base[j]),pp=project(p_att);
+      ctx.beginPath();ctx.moveTo(pb[0],pb[1]);ctx.lineTo(pp[0],pp[1]);
+      ctx.strokeStyle='rgba(80,200,210,0.28)';ctx.lineWidth=0.7;
+      ctx.setLineDash([2,3]);ctx.stroke();ctx.setLineDash([]);
+    }
+
+    // Plate perimeter ring
+    ctx.beginPath();
+    for(let j=0;j<=NP;j++){
+      const p_att=v3.add(fr.pos,apR(R,SIM.perim_loc[j%NP]));
+      const pp=project(p_att);
+      j?ctx.lineTo(pp[0],pp[1]):ctx.moveTo(pp[0],pp[1]);
+    }
+    ctx.strokeStyle='rgba(80,200,210,0.65)';ctx.lineWidth=1.2;ctx.stroke();
+  }
+
+  // ---- Main tendons ----
+  SIM.base_pts.forEach((b,i)=>{
+    const p_att=v3.add(fr.pos,apR(R,SIM.plate_loc[i]));
+    const pb=project(b),pp=project(p_att);
+    // Slack state: from exported data or infer from tension
+    const isSlack = fr.slack ? fr.slack[i]===0 : fr.tens[i]<0.01;
+    ctx.beginPath();ctx.moveTo(pb[0],pb[1]);ctx.lineTo(pp[0],pp[1]);
+    ctx.strokeStyle=isSlack?'rgba(180,180,180,0.22)':TCOL[i]+'dd';
+    ctx.lineWidth=isSlack?0.8:2.2;
+    ctx.setLineDash(isSlack?[4,5]:[]);ctx.stroke();ctx.setLineDash([]);
+
+    // Base anchor
+    ctx.beginPath();ctx.arc(pb[0],pb[1],5,0,Math.PI*2);
+    ctx.fillStyle=isSlack?'rgba(180,180,180,0.4)':TCOL[i];ctx.fill();
+    ctx.font='bold 11px Courier New';
+    ctx.fillStyle=isSlack?'rgba(180,180,180,0.5)':TCOL[i];
+    ctx.fillText('T'+(i+1),pb[0]+8,pb[1]-4);
+  });
+
+  // ---- Plate ----
+  const corners=plateCorners(ps).map(v=>project(v3.add(fr.pos,apR(R,v))));
+  ctx.beginPath();
+  corners.forEach((v,i)=>i?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]));
+  ctx.closePath();
+  ctx.fillStyle='rgba(70,130,200,0.22)';ctx.fill();
+  ctx.strokeStyle='rgba(110,175,255,0.85)';ctx.lineWidth=1.5;ctx.stroke();
+
+  // ---- Normal arrow (derived from quaternion, always correct) ----
+  const ctr=project(fr.pos);
+  const nEnd=project(v3.add(fr.pos,v3.sc(normal,ps*0.9)));
+  ctx.beginPath();ctx.moveTo(ctr[0],ctr[1]);ctx.lineTo(nEnd[0],nEnd[1]);
+  ctx.strokeStyle='rgba(255,255,255,0.8)';ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(nEnd[0],nEnd[1],3,0,Math.PI*2);
+  ctx.fillStyle='white';ctx.fill();
+
+  ctx.beginPath();ctx.arc(ctr[0],ctr[1],3.5,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.55)';ctx.fill();
+
+  // ---- Sidebar ----
+  document.getElementById('v-y').textContent=fr.pos[1].toFixed(4)+' m';
+  const eul=quatToEuler(q);
+  document.getElementById('v-rot').textContent=
+    eul.map(e=>e.toFixed(1)+'°').join('  ');
+  document.getElementById('v-t').textContent=fr.t.toFixed(3)+' s';
+  document.getElementById('tval').textContent=fr.t.toFixed(2)+' s';
+
+  const kArr=SIM.k||[60,180,350], L0Arr=SIM.L0||[0.1,0.1,0.1];
+  ['t1','t2','t3'].forEach((id,i)=>{
+    const tv=fr.tens[i];
+    const isSlack=fr.slack?fr.slack[i]===0:tv<0.01;
+    document.getElementById(id+'-val').textContent=
+      `T${i+1}  ${tv.toFixed(2)} N`;
+    const badge=document.getElementById(id+'-badge');
+    badge.textContent=isSlack?'SLACK':'TAUT';
+    badge.className='badge '+(isSlack?'badge-slack':'badge-taut');
+  });
+
+  const pm=fr.perim_mean||0;
+  document.getElementById('v-perim').textContent=pm.toFixed(2)+' N';
+
+  drawTensionChart(fi);
+}
+
+// ============================================================
+//  TENSION CHART
+// ============================================================
+const tcv=document.getElementById('tens-canvas');
+const tctx=tcv.getContext('2d');
+
+function drawTensionChart(fi){
+  const cw=tcv.width,ch=tcv.height;
+  tctx.clearRect(0,0,cw,ch);
+  const N=SIM.frames.length;
+  const maxT=Math.max(0.1,...SIM.frames.map(f=>Math.max(...f.tens,f.perim_mean||0)));
+  const pad={l:52,r:12,t:13,b:26};
+  const gw=cw-pad.l-pad.r, gh=ch-pad.t-pad.b;
+
+  tctx.font='10px Courier New';
+  [0,0.5,1].forEach(frac=>{
+    const yv=(maxT*frac).toFixed(1);
+    const y=pad.t+gh-gh*frac;
+    tctx.fillStyle='rgba(255,255,255,0.25)';
+    tctx.fillText(yv+'N',2,y+4);
+    tctx.beginPath();tctx.strokeStyle='rgba(255,255,255,0.06)';tctx.lineWidth=0.5;
+    tctx.moveTo(pad.l,y);tctx.lineTo(pad.l+gw,y);tctx.stroke();
+  });
+
+  const totalT=SIM.frames[N-1].t;
+  [0,1,2,3,4,5,6].forEach(tv=>{
+    if(tv>totalT+0.01) return;
+    const x=pad.l+gw*(tv/totalT);
+    tctx.fillStyle='rgba(255,255,255,0.25)';
+    tctx.fillText(tv+'s',x-7,ch-5);
+  });
+
+  // Shade slack regions per tendon
+  TCOL.forEach((col,ti)=>{
+    tctx.fillStyle=col.replace(')',',0.06)').replace('rgb','rgba');
+    let inSlack=false, sx=0;
+    SIM.frames.forEach((f,i)=>{
+      const isSlack=f.slack?f.slack[ti]===0:f.tens[ti]<0.01;
+      const x=pad.l+gw*(i/(N-1));
+      if(isSlack&&!inSlack){ sx=x; inSlack=true; }
+      if(!isSlack&&inSlack){
+        tctx.fillRect(sx,pad.t,x-sx,gh);
+        inSlack=false;
+      }
+    });
+    if(inSlack) tctx.fillRect(sx,pad.t,pad.l+gw-sx,gh);
+  });
+
+  // Perimeter mean (dashed cyan)
+  tctx.beginPath();tctx.strokeStyle='rgba(80,200,210,0.5)';tctx.lineWidth=1;
+  tctx.setLineDash([3,4]);
+  SIM.frames.forEach((f,i)=>{
+    const x=pad.l+gw*(i/(N-1));
+    const y=pad.t+gh-gh*((f.perim_mean||0)/maxT);
+    i?tctx.lineTo(x,y):tctx.moveTo(x,y);
+  });tctx.stroke();tctx.setLineDash([]);
+
+  // Main tendon lines
+  TCOL.forEach((col,ti)=>{
+    tctx.beginPath();tctx.strokeStyle=col;tctx.lineWidth=1.7;
+    SIM.frames.forEach((f,i)=>{
+      const x=pad.l+gw*(i/(N-1));
+      const y=pad.t+gh-gh*(f.tens[ti]/maxT);
+      i?tctx.lineTo(x,y):tctx.moveTo(x,y);
+    });tctx.stroke();
+  });
+
+  // Playhead
+  const cx=pad.l+gw*(fi/(N-1));
+  tctx.beginPath();tctx.strokeStyle='rgba(255,255,255,0.4)';
+  tctx.lineWidth=1;tctx.setLineDash([3,3]);
+  tctx.moveTo(cx,pad.t);tctx.lineTo(cx,pad.t+gh);
+  tctx.stroke();tctx.setLineDash([]);
+
+  // Legend
+  tctx.font='10px Courier New';
+  [['T1',TCOL[0]],['T2',TCOL[1]],['T3',TCOL[2]],['Perim','rgba(80,200,210,0.8)']].forEach(([lbl,col],i)=>{
+    tctx.fillStyle=col; tctx.fillText(lbl,pad.l+6+i*45,pad.t+12);
+  });
+  tctx.fillStyle='rgba(255,255,255,0.2)';
+  tctx.fillText('shading = slack region', pad.l+6+4*45, pad.t+12);
+}
+
+// ============================================================
+//  TRANSPORT
+// ============================================================
+const scrubber=document.getElementById('scrubber');
+scrubber.max=SIM.frames.length-1;
+scrubber.addEventListener('input',()=>{if(isPlaying)pause();draw();});
+
+let isPlaying=false,animId=null,lastTS=null,frameF=0;
+const playBtn=document.getElementById('btn-play');
+
+function play(){
+  isPlaying=true;playBtn.textContent='⏸ Pause';playBtn.classList.add('active');
+  lastTS=null;
+  function step(ts){
+    if(!isPlaying)return;
+    if(lastTS!==null){
+      const spd=parseFloat(document.getElementById('spd').value);
+      const fdt=SIM.frames[1]?(SIM.frames[1].t-SIM.frames[0].t):0.008;
+      frameF+=((ts-lastTS)/1000)*spd/fdt;
+      if(frameF>=SIM.frames.length-1){frameF=SIM.frames.length-1;scrubber.value=Math.round(frameF);draw();pause();return;}
+      scrubber.value=Math.round(frameF);draw();
+    }
+    lastTS=ts;animId=requestAnimationFrame(step);
+  }
+  animId=requestAnimationFrame(step);
+}
+function pause(){
+  isPlaying=false;playBtn.textContent='▶ Play';playBtn.classList.remove('active');
+  cancelAnimationFrame(animId);
+}
+playBtn.addEventListener('click',()=>isPlaying?pause():play());
+document.getElementById('btn-reset').addEventListener('click',()=>{pause();frameF=0;scrubber.value=0;draw();});
+
+draw();
+</script>
+</body>
+</html>
